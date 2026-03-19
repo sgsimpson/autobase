@@ -25,10 +25,8 @@ jobs:
       - name: Extract branch or tag name
         run: |
           if [[ -n "${GITHUB_HEAD_REF}" ]]; then
-            # This is a PR, use the source branch name
             echo "REF_NAME=${GITHUB_HEAD_REF}" >> $GITHUB_ENV
           else
-            # This is a push, use the branch or tag name from GITHUB_REF
             echo "REF_NAME=${GITHUB_REF##*/}" >> $GITHUB_ENV
           fi
 
@@ -43,10 +41,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        if: ${{ github.event_name != 'pull_request' }}
-
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -58,20 +52,9 @@ jobs:
       - name: Run Docker lint
         run: make docker-lint
 
-      - name: Run Docker build (amd64)
-        run: make docker-build
-        env:
-          TAG: ${{ env.TAG }}
-          DOCKER_BUILD_PLATFORM: linux/amd64
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Run Docker build (arm64)
-        if: ${{ github.event_name != 'pull_request' }}
-        run: make docker-build
-        env:
-          TAG: ${{ env.TAG }}
-          DOCKER_BUILD_PLATFORM: linux/arm64
-
-      # push images to GitHub Container Registry
       - name: Log in to GitHub Container Registry
         if: ${{ github.event_name != 'pull_request' }}
         uses: docker/login-action@v3
@@ -80,16 +63,57 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push images to GHCR
-        if: ${{ github.event_name != 'pull_request' }}
-        env:
-          TAG: ${{ env.TAG }}
-          REGISTRY: ghcr.io/${{ github.repository_owner }}
-        run: |
-          SANITIZED_TAG="${TAG//\//-}"
-          make docker-buildx-setup
-          docker buildx build --no-cache --platform linux/amd64,linux/arm64 --tag "${REGISTRY}/automation:${SANITIZED_TAG}" --file automation/Dockerfile --push .
-          docker buildx build --no-cache --platform linux/amd64,linux/arm64 --tag "${REGISTRY}/console_ui:${SANITIZED_TAG}" --file console/ui/Dockerfile --push .
-          docker buildx build --no-cache --platform linux/amd64,linux/arm64 --tag "${REGISTRY}/console_api:${SANITIZED_TAG}" --file console/service/Dockerfile --push .
-          docker buildx build --no-cache --platform linux/amd64,linux/arm64 --tag "${REGISTRY}/console_db:${SANITIZED_TAG}" --file console/db/Dockerfile --push .
-          docker buildx build --no-cache --platform linux/amd64,linux/arm64 --tag "${REGISTRY}/console:${SANITIZED_TAG}" --file console/Dockerfile --push .
+      - name: Build and push automation image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: automation/Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ghcr.io/${{ github.repository_owner }}/automation:${{ env.TAG }}
+          cache-from: type=gha,scope=automation
+          cache-to: type=gha,mode=max,scope=automation
+
+      - name: Build and push console_ui image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: console/ui/Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ghcr.io/${{ github.repository_owner }}/console_ui:${{ env.TAG }}
+          cache-from: type=gha,scope=console_ui
+          cache-to: type=gha,mode=max,scope=console_ui
+
+      - name: Build and push console_api image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: console/service/Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ghcr.io/${{ github.repository_owner }}/console_api:${{ env.TAG }}
+          cache-from: type=gha,scope=console_api
+          cache-to: type=gha,mode=max,scope=console_api
+
+      - name: Build and push console_db image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: console/db/Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ghcr.io/${{ github.repository_owner }}/console_db:${{ env.TAG }}
+          cache-from: type=gha,scope=console_db
+          cache-to: type=gha,mode=max,scope=console_db
+
+      - name: Build and push console image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: console/Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ghcr.io/${{ github.repository_owner }}/console:${{ env.TAG }}
+          cache-from: type=gha,scope=console
+          cache-to: type=gha,mode=max,scope=console
