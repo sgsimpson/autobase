@@ -9,6 +9,10 @@ on:
     branches:
       - master
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -66,11 +70,25 @@ jobs:
           TAG: ${{ env.TAG }}
           DOCKER_BUILD_PLATFORM: linux/arm64
 
-      # push latest image
-      - name: Run Docker push
-        if: ${{ env.DOCKER_REGISTRY_USER != '' && env.DOCKER_REGISTRY_PASSWORD != '' && github.event_name != 'pull_request' }}
-        run: make docker-push
+      # push images to GitHub Container Registry
+      - name: Log in to GitHub Container Registry
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push images to GHCR
+        if: ${{ github.event_name != 'pull_request' }}
         env:
           TAG: ${{ env.TAG }}
-          DOCKER_REGISTRY_USER: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_REGISTRY_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          REGISTRY: ghcr.io/${{ github.repository_owner }}
+        run: |
+          SANITIZED_TAG="${TAG//\//-}"
+          make docker-buildx-setup
+          docker buildx build --no-cache --platform linux/amd64,linux/arm64 --tag "${REGISTRY}/automation:${SANITIZED_TAG}" --file automation/Dockerfile --push .
+          docker buildx build --no-cache --platform linux/amd64,linux/arm64 --tag "${REGISTRY}/console_ui:${SANITIZED_TAG}" --file console/ui/Dockerfile --push .
+          docker buildx build --no-cache --platform linux/amd64,linux/arm64 --tag "${REGISTRY}/console_api:${SANITIZED_TAG}" --file console/service/Dockerfile --push .
+          docker buildx build --no-cache --platform linux/amd64,linux/arm64 --tag "${REGISTRY}/console_db:${SANITIZED_TAG}" --file console/db/Dockerfile --push .
+          docker buildx build --no-cache --platform linux/amd64,linux/arm64 --tag "${REGISTRY}/console:${SANITIZED_TAG}" --file console/Dockerfile --push .
